@@ -238,12 +238,3 @@ def _load_config():
     return _load_yml_file(
         "config.yml",
         error_message='No config file found. Please see the docs and create a config.yml file')
-
-
-t = Toggl()
-
-# foo1 = t.detailed_report('2018-01-01', '2018-01-31')
-# foo2 = foo1 = t.detailed_report('2018-01-01', '2018-01-31')
-# display(foo1)
-# display(foo2)
-t.intacct_format('2018-01-01', '2018-01-31')
