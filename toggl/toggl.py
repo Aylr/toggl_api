@@ -40,7 +40,7 @@ class Endpoints():
 class Toggl(object):
     def __init__(self, email=None, api_key=None):
         if email is None and api_key is None:
-            config = self._load_config()
+            config = _load_config()
             email = config['email']
             api_key = config['toggl_api_key']
         elif (email is not None and api_key is None) or (
@@ -53,9 +53,10 @@ class Toggl(object):
         self.headers = self._build_headers(api_key)
         self.workspace = self._get_workspace()
         self.params = self._build_default_params()
-        self.codes = self._load_code_mapping()
+        self.codes = _load_code_mapping()
 
     def detailed_report(self, start=None, end=None, params=None):
+        """Generate a dataframe that has all columns from toggl."""
         if params is None:
             params = self.params
         if start:
@@ -67,6 +68,7 @@ class Toggl(object):
         return pd.DataFrame(response['data'])
 
     def report(self, start=None, end=None, params=None):
+        """Generate a dataframe of selected columns from toggl."""
         if params is None:
             params = self.params
         if start:
@@ -84,7 +86,11 @@ class Toggl(object):
              'duration_hr']]
 
     def intacct_format(self, start=None, end=None):
-        """Index, resample, pivot and fill nas and reorder columns  ."""
+        """
+        Generate a dataframe that matches Intacct timesheet format.
+
+        Index, resample, pivot and fill nas and reorder columns.
+        """
         df = self.report(start=start, end=end)
         df.set_index(df['start'], inplace=True)
         resampled = df[
@@ -184,26 +190,26 @@ class Toggl(object):
             "User-Agent": "python/urllib",
         }
 
-    @staticmethod
-    def _load_yml(yml, error_message='Error loading yml file.'):
-        """Load a yml file."""
-        try:
-            with open(yml, 'r') as ymlfile:
-                cfg = yaml.load(ymlfile)
-                return cfg
-        except FileNotFoundError as fe:
-            raise RuntimeError(error_message)
 
-    @staticmethod
-    def _load_code_mapping():
-        """Load a code_mapping.yml file."""
-        return _load_yml(
-            "code_mapping.yml",
-            error_message='No code mapping file found. Please see the docs and create a code_mapping.yml file')
+def _load_yml_file(yml, error_message='Error loading yml file.'):
+    """Load a yml file."""
+    try:
+        with open(yml, 'r') as ymlfile:
+            cfg = yaml.load(ymlfile)
+            return cfg
+    except FileNotFoundError as fe:
+        raise RuntimeError(error_message)
 
-    @staticmethod
-    def _load_config():
-        """Load a config.yml file."""
-        return _load_yml(
-            "config.yml",
-            error_message='No config file found. Please see the docs and create a config.yml file')
+
+def _load_code_mapping():
+    """Load a code_mapping.yml file."""
+    return _load_yml_file(
+        "code_mapping.yml",
+        error_message='No code mapping file found. Please see the docs and create a code_mapping.yml file')
+
+
+def _load_config():
+    """Load a config.yml file."""
+    return _load_yml_file(
+        "config.yml",
+        error_message='No config file found. Please see the docs and create a config.yml file')
