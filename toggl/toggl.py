@@ -10,13 +10,14 @@ toggl = Toggl(YOUR_EMAIL, YOUR_API_KEY)
 toggl.intacct_format()
 ```
 """
+import math
+import certifi
+import json
+import yaml
+import pandas as pd
 from urllib.parse import urlencode
 from urllib.request import urlopen, Request
 from base64 import b64encode
-import certifi
-import json
-import pandas as pd
-import yaml
 
 
 class Endpoints():
@@ -38,7 +39,7 @@ class Endpoints():
 
 
 class Toggl(object):
-    def __init__(self, email=None, api_key=None):
+    def __init__(self, email=None, api_key=None, verbose=False):
         if email is None and api_key is None:
             config = _load_config()
             email = config['email']
@@ -49,11 +50,14 @@ class Toggl(object):
 
         self.email = email
         self.api_key = api_key
+        self.verbose = verbose
         self.cafile = certifi.where()
         self.headers = self._build_headers(api_key)
         self.workspace = self._get_workspace()
         self.params = self._build_default_params()
         self.codes = _load_code_mapping()
+        self.current_page = 1
+        self.pages = 1
 
     def detailed_report(self, start=None, end=None, params=None):
         """Generate a dataframe that has all columns from toggl."""
@@ -64,26 +68,40 @@ class Toggl(object):
         if end:
             params['until'] = end
 
-        response = self.request(Endpoints.REPORT_DETAILED, params)
-        return pd.DataFrame(response['data'])
+        df = self._load_report_page(params)
+
+        while self.current_page < self.pages:
+            self.current_page += 1
+            params['page'] = self.current_page
+            df = pd.concat([df, self._load_report_page(params)])
+
+            df.reset_index(inplace=True)
+
+        self._reset_instance_pagination()
+
+        return df
 
     def report(self, start=None, end=None, params=None):
         """Generate a dataframe of selected columns from toggl."""
-        if params is None:
-            params = self.params
-        if start:
-            params['since'] = start
-        if end:
-            params['until'] = end
+        df = self.detailed_report(start=start, end=end, params=params)
 
-        response = self.request(Endpoints.REPORT_DETAILED, params)
-
-        df = pd.DataFrame(response['data'])
-        df = self._clean_times(df)
-
+        print('Loaded {} records.'.format(len(df)))
         return df[
             ['client', 'project', 'description', 'start', 'end', 'duration_min',
              'duration_hr']]
+
+    def _load_report_page(self, params):
+        response = self.request(Endpoints.REPORT_DETAILED, params)
+
+        record_count = response['total_count']
+        self.pages = math.ceil(record_count / response['per_page'])
+        if self.verbose and record_count > response['per_page']:
+            print('Pagination required: {} records found. {} of {} pages '
+                  'needed.'.format(record_count, self.current_page, self.pages))
+
+        df = pd.DataFrame(response['data'])
+        df = self._clean_times(df)
+        return df
 
     def intacct_format(self, start=None, end=None):
         """
@@ -92,6 +110,8 @@ class Toggl(object):
         Index, resample, pivot and fill nas and reorder columns.
         """
         df = self.report(start=start, end=end)
+        print('Pivoting {} toggl time entry records.'.format(len(df)))
+
         df.set_index(df['start'], inplace=True)
         resampled = df[
             ['client', 'project', 'start', 'duration_hr']].groupby(
@@ -135,6 +155,7 @@ class Toggl(object):
         df['duration'] = df['end'] - df['start']
         df['duration_min'] = [x.seconds / 60 for x in df['duration']]
         df['duration_hr'] = [x.seconds / 3600 for x in df['duration']]
+
         return df
 
     @staticmethod
@@ -189,6 +210,10 @@ class Toggl(object):
             "Accept": "*/*",
             "User-Agent": "python/urllib",
         }
+
+    def _reset_instance_pagination(self):
+        self.current_page = 1
+        self.pages = 1
 
 
 def _load_yml_file(yml, error_message='Error loading yml file.'):
