@@ -10,13 +10,15 @@ toggl = Toggl(YOUR_EMAIL, YOUR_API_KEY)
 toggl.intacct_format()
 ```
 """
+import math
+import certifi
+import json
+import yaml
+import pandas as pd
 from urllib.parse import urlencode
 from urllib.request import urlopen, Request
 from base64 import b64encode
-import certifi
-import json
-import pandas as pd
-import yaml
+
 
 
 class Endpoints():
@@ -54,6 +56,7 @@ class Toggl(object):
         self.workspace = self._get_workspace()
         self.params = self._build_default_params()
         self.codes = _load_code_mapping()
+        self.current_page = 1
 
     def detailed_report(self, start=None, end=None, params=None):
         """Generate a dataframe that has all columns from toggl."""
@@ -76,14 +79,28 @@ class Toggl(object):
         if end:
             params['until'] = end
 
+        df = self._load_report_page(params)
+
+        while self.current_page < self.pages:
+            self.current_page += 1
+            params['page'] = self.current_page
+            df = pd.concat([df, self._load_report_page(params)])
+
+            df.reset_index(inplace=True)
+
+        return df[['client', 'project', 'description', 'start', 'end', 'duration_min', 'duration_hr']]
+
+    def _load_report_page(self, params):
         response = self.request(Endpoints.REPORT_DETAILED, params)
+
+        record_count = response['total_count']
+        self.pages = math.ceil(record_count / response['per_page'])
+        if record_count > response['per_page']:
+            print('Pagination required: {} records found. {} of {} pages needed.'.format(record_count, self.current_page, self.pages))
 
         df = pd.DataFrame(response['data'])
         df = self._clean_times(df)
-
-        return df[
-            ['client', 'project', 'description', 'start', 'end', 'duration_min',
-             'duration_hr']]
+        return df
 
     def intacct_format(self, start=None, end=None):
         """
@@ -213,3 +230,7 @@ def _load_config():
     return _load_yml_file(
         "config.yml",
         error_message='No config file found. Please see the docs and create a config.yml file')
+
+t = Toggl()
+
+t.report('2018-01-01', '2018-01-31')
