@@ -52,3 +52,20 @@ Beeblebrox:
     intacct_project: P00876--Spacecraft Maintenance
     intacct_task: 8594--Infinite Improbability Drive Realignment
 ```
+
+## Detailed Usage
+
+### Intacct Format Reports
+
+To get a dataframe and csv resampled and pivoted to match Intacct Timesheet 
+format, use the `.intacct_format()` method.
+
+When called, it requires a start and end date. This function returns a pandas
+dataframe and by default saves a .csv file. CSV output can be disabled by using
+the `save_csv=False` argument.
+
+```python
+t = Toggl()
+
+df = t.intacct_format(start='2018-01-01', end='2018-01-15')
+```
