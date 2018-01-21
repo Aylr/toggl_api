@@ -1,7 +1,8 @@
 """
 Toggl Data Wrangling.
 
-
+This class pulls data from the toggl API and build nice dataframes in various
+formats.
 
 Usage:
 
@@ -20,7 +21,9 @@ from urllib.request import urlopen, Request
 from base64 import b64encode
 
 
-class Endpoints():
+class Endpoints(object):
+    """Endpoints for the toggl API."""
+
     WORKSPACES = "https://www.toggl.com/api/v8/workspaces"
     CLIENTS = "https://www.toggl.com/api/v8/clients"
     PROJECTS = "https://www.toggl.com/api/v8/projects"
@@ -33,13 +36,25 @@ class Endpoints():
 
     @staticmethod
     def STOP_TIME(pid):
-        return "https://www.toggl.com/api/v8/time_entries/" + str(pid) + "/stop"
+        """Get the stop time url."""
+        url = 'https://www.toggl.com/api/v8/time_entries/' + str(pid) + '/stop'
+        return url
 
     CURRENT_RUNNING_TIME = "https://www.toggl.com/api/v8/time_entries/current"
 
 
 class Toggl(object):
+    """Toggl data class."""
+
     def __init__(self, email=None, api_key=None, verbose=False):
+        """
+        Create a Toggl object.
+
+        Args:
+            email (str): Your toggle email.
+            api_key (str): Your toggle api_key.
+            verbose (bool): Set to True if you want debugging output.
+        """
         if email is None and api_key is None:
             config = _load_config()
             email = config['email']
@@ -79,35 +94,37 @@ class Toggl(object):
 
         self._reset_instance_pagination()
 
+        if self.verbose:
+            print('Loaded {} records.'.format(len(df)))
+
         return df
 
     def report(self, start=None, end=None, params=None):
         """Generate a dataframe of selected columns from toggl."""
         df = self.detailed_report(start=start, end=end, params=params)
 
-        print('Loaded {} records.'.format(len(df)))
-        return df[
-            ['client', 'project', 'description', 'start', 'end', 'duration_min',
-             'duration_hr']]
+        return df[[
+            'client',
+            'project',
+            'description',
+            'start',
+            'end',
+            'duration_min',
+            'duration_hr']]
 
-    def _load_report_page(self, params):
-        response = self.request(Endpoints.REPORT_DETAILED, params)
-
-        record_count = response['total_count']
-        self.pages = math.ceil(record_count / response['per_page'])
-        if self.verbose and record_count > response['per_page']:
-            print('Pagination required: {} records found. {} of {} pages '
-                  'needed.'.format(record_count, self.current_page, self.pages))
-
-        df = pd.DataFrame(response['data'])
-        df = self._clean_times(df)
-        return df
-
-    def intacct_format(self, start=None, end=None):
+    def intacct_format(self, start, end):
         """
         Generate a dataframe that matches Intacct timesheet format.
 
         Index, resample, pivot and fill nas and reorder columns.
+
+        Args:
+            start (str): The start date in 'YYYY-MM-DD' format
+            end (str): The end date in 'YYYY-MM-DD' format
+
+        Returns:
+            pandas.DataFrame: A dataframe containing the timesheet format data
+            with one row per client-project-task.
         """
         df = self.report(start=start, end=end)
         print('Pivoting {} toggl time entry records.'.format(len(df)))
@@ -122,12 +139,14 @@ class Toggl(object):
                                       values='duration_hr')
 
         reshaped = pivot.fillna(0).reset_index()
-
         coded = self._map_codes(reshaped)
         codes = coded[['client_code', 'project_code', 'task_code']]
         dates = coded.select_dtypes(include='float64')
+        idx = pd.date_range(start, end)
+        fixed_dates = dates.reindex(idx, axis='columns', fill_value=0)
 
-        reordered = pd.concat([codes, dates], axis=1, join_axes=[coded.index])
+        reordered = pd.concat([codes, fixed_dates], axis=1,
+                              join_axes=[coded.index])
         return reordered
 
     def request(self, endpoint, parameters=None):
@@ -147,6 +166,22 @@ class Toggl(object):
             return urlopen(Request(endpoint, headers=self.headers),
                            cafile=self.cafile).read()
 
+    def _load_report_page(self, params):
+        response = self.request(Endpoints.REPORT_DETAILED, params)
+
+        record_count = response['total_count']
+        self.pages = math.ceil(record_count / response['per_page'])
+        if self.verbose and record_count > response['per_page']:
+            print('Pagination required: {} records found.'
+                  '{} of {} pages needed.'.format(
+                    record_count,
+                    self.current_page,
+                    self.pages))
+
+        df = pd.DataFrame(response['data'])
+        df = self._clean_times(df)
+        return df
+
     @staticmethod
     def _clean_times(df):
         """Convert string times to times and timedeltas."""
@@ -162,6 +197,7 @@ class Toggl(object):
     def _build_api_auth(api_key):
         """
         Build API auth string.
+
         https://github.com/toggl/toggl_api_docs/blob/master/chapters/authentication.md
         """
         auth_header = api_key + ":" + "api_token"
@@ -230,11 +266,13 @@ def _load_code_mapping():
     """Load a code_mapping.yml file."""
     return _load_yml_file(
         "code_mapping.yml",
-        error_message='No code mapping file found. Please see the docs and create a code_mapping.yml file')
+        error_message='No code mapping file found. Please see the docs and '
+                      'create a code_mapping.yml file')
 
 
 def _load_config():
     """Load a config.yml file."""
     return _load_yml_file(
         "config.yml",
-        error_message='No config file found. Please see the docs and create a config.yml file')
+        error_message='No config file found. Please see the docs and create a '
+                      'config.yml file')
