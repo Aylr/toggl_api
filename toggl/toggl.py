@@ -14,6 +14,8 @@ toggl.intacct_format()
 import math
 import certifi
 import json
+
+import time
 import yaml
 import pandas as pd
 from urllib.parse import urlencode
@@ -112,15 +114,17 @@ class Toggl(object):
             'duration_min',
             'duration_hr']]
 
-    def intacct_format(self, start, end):
+    def intacct_format(self, start, end, save_csv=True):
         """
-        Generate a dataframe that matches Intacct timesheet format.
+        Generate a dataframe & csv that matches Intacct timesheet format.
 
-        Index, resample, pivot and fill nas and reorder columns.
+        Index, re-sample, pivot and fill nas, reorder columns, fill missing
+        days and save a csv by default.
 
         Args:
             start (str): The start date in 'YYYY-MM-DD' format
             end (str): The end date in 'YYYY-MM-DD' format
+            save_csv (bool): Save a csv
 
         Returns:
             pandas.DataFrame: A dataframe containing the timesheet format data
@@ -147,6 +151,10 @@ class Toggl(object):
 
         reordered = pd.concat([codes, fixed_dates], axis=1,
                               join_axes=[coded.index])
+
+        if save_csv:
+            self._save_csv(reordered)
+
         return reordered
 
     def request(self, endpoint, parameters=None):
@@ -181,6 +189,13 @@ class Toggl(object):
         df = pd.DataFrame(response['data'])
         df = self._clean_times(df)
         return df
+
+    @staticmethod
+    def _save_csv(df):
+        time_string = time.strftime("%Y-%m-%dT%H-%M-%S")
+        filename = '{}_toggl_hours_intacct_format.csv'.format(time_string)
+        df.to_csv(filename)
+        print('Saved report to {}'.format(filename))
 
     @staticmethod
     def _clean_times(df):
