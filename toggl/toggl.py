@@ -28,15 +28,16 @@ from base64 import b64encode
 class Endpoints(object):
     """Endpoints for the toggl API."""
 
-    WORKSPACES = "https://www.toggl.com/api/v8/workspaces"
-    CLIENTS = "https://www.toggl.com/api/v8/clients"
-    PROJECTS = "https://www.toggl.com/api/v8/projects"
-    REPORT_WEEKLY = "https://toggl.com/reports/api/v2/weekly"
-    REPORT_DETAILED = "https://toggl.com/reports/api/v2/details"
-    REPORT_SUMMARY = "https://toggl.com/reports/api/v2/summary"
-    START_TIME = "https://www.toggl.com/api/v8/time_entries/start"
-    TIME_ENTRIES = "https://www.toggl.com/api/v8/time_entries"
     WORKSPACES = 'https://www.toggl.com/api/v8/workspaces'
+    CLIENTS = 'https://www.toggl.com/api/v8/clients'
+    PROJECTS = 'https://www.toggl.com/api/v8/projects'
+    REPORT_DETAILED = 'https://toggl.com/reports/api/v2/details'
+    REPORT_SUMMARY = 'https://toggl.com/reports/api/v2/summary'
+    START_TIME = 'https://www.toggl.com/api/v8/time_entries/start'
+    TIME_ENTRIES = 'https://www.toggl.com/api/v8/time_entries'
+    WORKSPACES = 'https://www.toggl.com/api/v8/workspaces'
+    CURRENT_RUNNING_TIME = "https://www.toggl.com/api/v8/time_entries/current"
+    REPORT_WEEKLY = 'https://toggl.com/reports/api/v2/weekly'
 
     @staticmethod
     def STOP_TIME(pid):
@@ -44,7 +45,10 @@ class Endpoints(object):
         url = 'https://www.toggl.com/api/v8/time_entries/' + str(pid) + '/stop'
         return url
 
-    CURRENT_RUNNING_TIME = "https://www.toggl.com/api/v8/time_entries/current"
+    @staticmethod
+    def WORKSPACE_PROJECTS(id):
+        return 'https://www.toggl.com/api/v8/workspaces/{}/projects'.format(id)
+
 
 
 class Toggl(object):
@@ -77,8 +81,8 @@ class Toggl(object):
         self.current_page = 1
         self.pages = 1
         self.intacct_codes = None
-        self.toggl_projects = None
-        self.toggl_clients = None
+        self.toggl_clients = self._get_clients()
+        self.toggl_projects = self._get_workspace_projects()
         self.intacct_clients = None
         self.intacct_projects = None
         self.intacct_client_codes = None
@@ -107,8 +111,8 @@ class Toggl(object):
         if self.verbose:
             print('Loaded {} records.'.format(len(df)))
 
-        self.toggl_projects = df['project'].unique()
-        self.toggl_clients = df['client'].unique()
+        # self.toggl_projects = df['project'].unique()
+        # self.toggl_clients = df['client'].unique()
         self._check_for_missing_clients_in_toggle(df)
 
         return df
@@ -269,7 +273,7 @@ class Toggl(object):
             return workspaces[0]['id']
         else:
             raise RuntimeError('Warning! You have more than 1 workspace. This '
-                               'is an MVP andcannot deal with your mess.')
+                               'is an MVP and cannot deal with your mess.')
 
     def _build_default_params(self):
         return {
@@ -349,7 +353,7 @@ class Toggl(object):
     def _show_missing_intacct_project_codes(self):
         missing_projects = set(self.toggl_projects) - set(self.intacct_projects)
         print('\nWARNING! Your code mapping file is missing entries for '
-              '{} clients that were found on Toggl. Please add them and try '
+              '{} projects that were found on Toggl. Please add them and try '
               'again.'.format(len(missing_projects)))
         print(missing_projects)
 
@@ -361,8 +365,51 @@ class Toggl(object):
         print(missing_clients)
 
     def create_code_mapping_template(self):
-        df = self.detailed_report()
+        """Create a code mapping template from your Toggl entries."""
+        try:
+            self.intacct_codes = self._load_code_mapping()
+            print('Found an existing code_mapping.yml file! Either use it '
+                  'or delete it and run this method again.')
+        except FileNotFoundError:
+            self._build_code_map_template()
 
+    def _get_clients(self):
+        """Get a list of all clients on Toggl."""
+        response = self.request(Endpoints.CLIENTS, self.params)
+
+        return [x['name'] for x in response]
+
+    def _get_workspace_projects(self):
+        """Get a list of all projects on Toggl."""
+        response = self.request(
+            Endpoints.WORKSPACE_PROJECTS(self.workspace),
+            self.params)
+
+        return [x['name'] for x in response]
+
+    def _build_code_map_template(self):
+        df = self.detailed_report(start='2018-01-16', end='2018-01-31')
+        project_by_client = df.groupby(by=['client', 'project'],
+                                       as_index=False).size().reset_index()
+        template = {c: {'intacct_client': 'CLIENT_CODE'} for c in
+                    self.toggl_clients}
+
+        for i, row in project_by_client.iterrows():
+            template[row['client']][row['project']] = {
+                'intacct_project': 'PROJECT_CODE', 'intacct_task': 'TASK_CODE'}
+
+        with open('code_mapping.yml', 'w') as outfile:
+            yaml.dump(template, outfile, default_flow_style=False)
+
+        print("""
+        Generated a code_mapping.yml template file. Please edit it as folows:
+        
+        1. Intacct has a Client > Project > Task hierarchy, while Toggl uses 
+        a Client > Project hierarchy. This means that you must map each Toggl 
+        project to two Intacct codes.
+        2. Copy and paste the client, project and task codes into the template.
+        3. Save the template and run the `.intacct_format()` method.
+        """)
 
 
 def _load_yml_file(yml, error_message='Error loading yml file.'):
@@ -372,7 +419,7 @@ def _load_yml_file(yml, error_message='Error loading yml file.'):
             cfg = yaml.load(ymlfile)
             return cfg
     except FileNotFoundError as fe:
-        raise RuntimeError(error_message)
+        raise FileNotFoundError(error_message)
 
 
 def _load_config():
