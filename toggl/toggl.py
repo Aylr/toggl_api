@@ -74,15 +74,15 @@ class Toggl(object):
         self.headers = self._build_headers(api_key)
         self.workspace = self._get_workspace()
         self.params = self._build_default_params()
-        self.codes = self._load_code_mapping()
         self.current_page = 1
         self.pages = 1
+        self.intacct_codes = None
         self.toggl_projects = None
         self.toggl_clients = None
-        self.intacct_clients = self._get_intacct_client_human_names()
-        self.intacct_projects = self._get_intacct_project_human_names()
-        self.intacct_client_codes = self._get_intacct_client_codes()
-        self.intacct_project_codes = self._get_intacct_project_codes()
+        self.intacct_clients = None
+        self.intacct_projects = None
+        self.intacct_client_codes = None
+        self.intacct_project_codes = None
 
     def detailed_report(self, start=None, end=None, params=None):
         """Generate a dataframe that has all columns from toggl."""
@@ -142,6 +142,12 @@ class Toggl(object):
             pandas.DataFrame: A dataframe containing the timesheet format data
             with one row per client-project-task.
         """
+        self.intacct_codes = self._load_code_mapping()
+        self.intacct_clients = self._get_intacct_client_human_names()
+        self.intacct_projects = self._get_intacct_project_human_names()
+        self.intacct_client_codes = self._get_intacct_client_codes()
+        self.intacct_project_codes = self._get_intacct_project_codes()
+
         df = self.report(start=start, end=end)
         print('Pivoting {} toggl time entry records.'.format(len(df)))
 
@@ -235,7 +241,7 @@ class Toggl(object):
 
     def _code_lookup(self, row):
         """Lookup Intacct billing codes."""
-        client = self.codes[row['client']]
+        client = self.intacct_codes[row['client']]
 
         c_id = client['intacct_client']
         project = client[row['project']]
@@ -294,12 +300,12 @@ class Toggl(object):
 
     def _get_intacct_client_human_names(self):
         """Get a list of all unique intacct client human names."""
-        return list(set(self.codes.keys()))
+        return list(set(self.intacct_codes.keys()))
 
     def _get_intacct_project_human_names(self):
         """Get a list of all unique intacct project human names."""
         projects = []
-        for k, v in self.codes.items():
+        for k, v in self.intacct_codes.items():
             for k2, v2 in v.items():
                 if k2 != 'intacct_client':
                     projects.append(k2)
@@ -308,14 +314,14 @@ class Toggl(object):
     def _get_intacct_client_codes(self):
         """Get a list of all unique intacct client codes."""
         client_codes = []
-        for k, v in self.codes.items():
+        for k, v in self.intacct_codes.items():
             client_codes.append(v['intacct_client'])
         return sorted(list(set(client_codes)))
 
     def _get_intacct_project_codes(self):
         """Get a list of all unique intacct project codes."""
         project_codes = []
-        for k, v in self.codes.items():
+        for k, v in self.intacct_codes.items():
             for k2, v2 in v.items():
                 if k2 != 'intacct_client':
                     project_codes.append(v2['intacct_project'])
@@ -324,7 +330,7 @@ class Toggl(object):
     def _get_intacct_task_codes(self):
         """Get a list of all unique intacct task codes."""
         task_codes = []
-        for k, v in self.codes.items():
+        for k, v in self.intacct_codes.items():
             for k2, v2 in v.items():
                 if k2 != 'intacct_client':
                     task_codes.append(v2['intacct_task'])
@@ -353,6 +359,10 @@ class Toggl(object):
               '{} clients that were found on Toggl. Please add them and try '
               'again.'.format(len(missing_clients)))
         print(missing_clients)
+
+    def create_code_mapping_template(self):
+        df = self.detailed_report()
+
 
 
 def _load_yml_file(yml, error_message='Error loading yml file.'):
