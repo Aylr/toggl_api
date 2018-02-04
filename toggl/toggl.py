@@ -16,6 +16,8 @@ import certifi
 import json
 
 import time
+
+import sys
 import yaml
 import pandas as pd
 from urllib.parse import urlencode
@@ -72,9 +74,15 @@ class Toggl(object):
         self.headers = self._build_headers(api_key)
         self.workspace = self._get_workspace()
         self.params = self._build_default_params()
-        self.codes = _load_code_mapping()
+        self.codes = self._load_code_mapping()
         self.current_page = 1
         self.pages = 1
+        self.toggl_projects = None
+        self.toggl_clients = None
+        self.intacct_clients = self._get_intacct_client_human_names()
+        self.intacct_projects = self._get_intacct_project_human_names()
+        self.intacct_client_codes = self._get_intacct_client_codes()
+        self.intacct_project_codes = self._get_intacct_project_codes()
 
     def detailed_report(self, start=None, end=None, params=None):
         """Generate a dataframe that has all columns from toggl."""
@@ -98,6 +106,10 @@ class Toggl(object):
 
         if self.verbose:
             print('Loaded {} records.'.format(len(df)))
+
+        self.toggl_projects = df['project'].unique()
+        self.toggl_clients = df['client'].unique()
+        self._check_for_missing_clients_in_toggle(df)
 
         return df
 
@@ -233,10 +245,15 @@ class Toggl(object):
         return c_id, p_id, t_id
 
     def _map_codes(self, df):
-        df['client_code'], df['project_code'], df['task_code'] = zip(
-            *df.apply(self._code_lookup, axis=1))
-
-        return df
+        try:
+            df['client_code'], df['project_code'], df['task_code'] = zip(
+                *df.apply(self._code_lookup, axis=1))
+            return df
+        except KeyError as ke:
+            self._show_missing_intacct_project_codes()
+            self._show_missing_intacct_client_codes()
+            print(ke)
+            sys.exit(0)
 
     def _get_workspace(self):
         """Get the user's first workspace."""
@@ -266,6 +283,77 @@ class Toggl(object):
         self.current_page = 1
         self.pages = 1
 
+    def _load_code_mapping(self):
+        """Load a code_mapping.yml file."""
+        code_mappings = _load_yml_file(
+            "code_mapping.yml",
+            error_message='No code mapping file found. Please see the docs and ' \
+                          'create a code_mapping.yml file')
+
+        return code_mappings
+
+    def _get_intacct_client_human_names(self):
+        """Get a list of all unique intacct client human names."""
+        return list(set(self.codes.keys()))
+
+    def _get_intacct_project_human_names(self):
+        """Get a list of all unique intacct project human names."""
+        projects = []
+        for k, v in self.codes.items():
+            for k2, v2 in v.items():
+                if k2 != 'intacct_client':
+                    projects.append(k2)
+        return sorted(list(set(projects)))
+
+    def _get_intacct_client_codes(self):
+        """Get a list of all unique intacct client codes."""
+        client_codes = []
+        for k, v in self.codes.items():
+            client_codes.append(v['intacct_client'])
+        return sorted(list(set(client_codes)))
+
+    def _get_intacct_project_codes(self):
+        """Get a list of all unique intacct project codes."""
+        project_codes = []
+        for k, v in self.codes.items():
+            for k2, v2 in v.items():
+                if k2 != 'intacct_client':
+                    project_codes.append(v2['intacct_project'])
+        return sorted(list(set(project_codes)))
+
+    def _get_intacct_task_codes(self):
+        """Get a list of all unique intacct task codes."""
+        task_codes = []
+        for k, v in self.codes.items():
+            for k2, v2 in v.items():
+                if k2 != 'intacct_client':
+                    task_codes.append(v2['intacct_task'])
+        return sorted(list(set(task_codes)))
+
+    def _check_for_missing_clients_in_toggle(self, df):
+        if df['client'].isnull().sum():
+            missing_client_entries = df.loc[
+                df['client'].isnull(), ['start', 'description', 'duration']]
+            print('WARNING! The following {} toggle entries are missing a '
+                  'client. If you want these mapped to an intacct client, ' \
+                  'please go to the web and add clients to entries without ' \
+                  ' them.'.format(len(missing_client_entries)))
+            print(missing_client_entries, '\n')
+
+    def _show_missing_intacct_project_codes(self):
+        missing_projects = set(self.toggl_projects) - set(self.intacct_projects)
+        print('\nWARNING! Your code mapping file is missing entries for '
+              '{} clients that were found on Toggl. Please add them and try '
+              'again.'.format(len(missing_projects)))
+        print(missing_projects)
+
+    def _show_missing_intacct_client_codes(self):
+        missing_clients = set(self.toggl_clients) - set(self.intacct_clients)
+        print('\nWARNING! Your code mapping file is missing entries for '
+              '{} clients that were found on Toggl. Please add them and try '
+              'again.'.format(len(missing_clients)))
+        print(missing_clients)
+
 
 def _load_yml_file(yml, error_message='Error loading yml file.'):
     """Load a yml file."""
@@ -275,14 +363,6 @@ def _load_yml_file(yml, error_message='Error loading yml file.'):
             return cfg
     except FileNotFoundError as fe:
         raise RuntimeError(error_message)
-
-
-def _load_code_mapping():
-    """Load a code_mapping.yml file."""
-    return _load_yml_file(
-        "code_mapping.yml",
-        error_message='No code mapping file found. Please see the docs and '
-                      'create a code_mapping.yml file')
 
 
 def _load_config():
