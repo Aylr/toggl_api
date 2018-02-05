@@ -65,38 +65,35 @@ def fill_start_date(browser, date):
 
 
 def fill_customer(browser, customer, index):
-    with browser.get_iframe('iamain') as iframe:
-        iframe.find_by_css(
+    browser.find_by_css(
             'input#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(
                 index)).fill(customer)
 
 
 def fill_project(browser, project, index):
-    with browser.get_iframe('iamain') as iframe:
-        iframe.find_by_css(
+    browser.find_by_css(
             'input#_obj__TIMESHEETITEMS_{}_-_obj__PROJECTID'.format(
                 index)).fill(project)
 
 
 def fill_task(browser, task, index):
-    with browser.get_iframe('iamain') as iframe:
-        iframe.find_by_css(
+    browser.find_by_css(
             'input#_obj__TIMESHEETITEMS_{}_-_obj__TASKKEY'.format(index)).fill(
             task)
 
 
 def fill_hours(browser, hours, index):
-    with browser.get_iframe('iamain') as iframe:
-        try:
-            for i, h in enumerate(hours):
-                selector = 'input#_obj__TIMESHEETITEMS_{}_-_obj__DAY_{}'.format(
-                    index, i)
-                temp_input = iframe.find_by_css(selector)
-                # For some reason floats can't be typed by splinter, so cast to str
-                temp_input.fill(str(h))
-        except (IndexError, ElementDoesNotExist, AttributeError) as e:
-            print('Please check your data. There are more days in your data '
-                  'than there are fields in intacct.')
+    try:
+        for i, h in enumerate(hours):
+            selector = 'input#_obj__TIMESHEETITEMS_{}_-_obj__DAY_{}'.format(
+                index, i)
+            temp_input = browser.find_by_css(selector)
+            # For some reason floats can't be typed by splinter, so cast to str
+            temp_input.fill(str(h))
+            temp_input.click()
+    except (IndexError, ElementDoesNotExist, AttributeError) as e:
+        print('Please check your data. There are more days in your data '
+              'than there are fields in intacct.')
 
 
 def fill_row(browser, index, customer, project, task, hours, delay=3):
