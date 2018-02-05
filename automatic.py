@@ -206,16 +206,23 @@ def main():
 
     t = toggl.Toggl()
     df = t.intacct_report(start_date, end_date, save_csv=False)
-    print(df.head())
 
     for i, row in df.iterrows():
-        with browser.get_iframe('iamain') as iframe:
-            iframe.find_by_css(
+        try:
+            with browser.get_iframe('iamain') as iframe:
+                iframe.find_by_css(
+                    '#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(
+                        i)).click()
+                print('preclick iframe worked')
+        except NoSuchFrameException:
+            browser.find_by_css(
                 '#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(i)).click()
-            fill_row(browser, i, row['client_code'], row['project_code'],
-                     row['task_code'], listify_hours(row), delay=1)
+            print('preclick browser worked')
+        fill_row(browser, i, row['client_code'], row['project_code'],
+                 row['task_code'], listify_hours(row), delay=1)
 
     save_draft(browser)
+
 
 if __name__ == '__main__':
     main()
