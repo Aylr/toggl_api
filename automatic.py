@@ -9,14 +9,24 @@ Then simply run `python automatic.py`.
 """
 import random
 import time
-
 import dateparser
 import splinter
 from splinter.exceptions import ElementDoesNotExist
 import toggl
+import toggl.utilities as utils
+from selenium.common.exceptions import NoSuchFrameException
 
-INTACCT_USERNAME = 'YOUR_INTACCT_EMAIL'
-INTACCT_URL = 'YOUR_INTACCT_URL'
+
+
+def load_config():
+    config = utils.load_config()
+    email = config['email']
+    intacct_url = config['intacct_url']
+    if (email is not None and intacct_url is None) or (
+            email is None and intacct_url is not None):
+        raise RuntimeError('Please specify both an email and api_key')
+
+    return email, intacct_url
 
 
 def fake_hours(days):
@@ -65,35 +75,74 @@ def fill_start_date(browser, date):
 
 
 def fill_customer(browser, customer, index):
-    browser.find_by_css(
-            'input#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(
-                index)).fill(customer)
+    try:
+        with browser.get_iframe('iamain') as iframe:
+            iframe.find_by_css(
+                    'input#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(
+                        index)).fill(customer)
+            print('customer iframe worked')
+    except NoSuchFrameException:
+        browser.find_by_css(
+                    'input#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(
+                        index)).fill(customer)
+        print('customer browser worked')
+
 
 
 def fill_project(browser, project, index):
-    browser.find_by_css(
-            'input#_obj__TIMESHEETITEMS_{}_-_obj__PROJECTID'.format(
-                index)).fill(project)
-
+    try:
+        with browser.get_iframe('iamain') as iframe:
+            iframe.find_by_css(
+                    'input#_obj__TIMESHEETITEMS_{}_-_obj__PROJECTID'.format(
+                        index)).fill(project)
+            print('project iframe worked')
+    except NoSuchFrameException:
+        browser.find_by_css(
+                    'input#_obj__TIMESHEETITEMS_{}_-_obj__PROJECTID'.format(
+                        index)).fill(project)
+        print('project browser worked')
 
 def fill_task(browser, task, index):
-    browser.find_by_css(
-            'input#_obj__TIMESHEETITEMS_{}_-_obj__TASKKEY'.format(index)).fill(
-            task)
-
+    try:
+        with browser.get_iframe('iamain') as iframe:
+            iframe.find_by_css(
+                    'input#_obj__TIMESHEETITEMS_{}_-_obj__TASKKEY'.format(index)).fill(
+                    task)
+            print('task iframe worked')
+    except NoSuchFrameException:
+        browser.find_by_css(
+                'input#_obj__TIMESHEETITEMS_{}_-_obj__TASKKEY'.format(index)).fill(
+                task)
+        print('task browser worked')
 
 def fill_hours(browser, hours, index):
     try:
-        for i, h in enumerate(hours):
-            selector = 'input#_obj__TIMESHEETITEMS_{}_-_obj__DAY_{}'.format(
+        with browser.get_iframe('iamain') as iframe:
+            try:
+                for i, h in enumerate(hours):
+                    selector = 'input#_obj__TIMESHEETITEMS_{}_-_obj__DAY_{}'.format(
+                    index, i)
+                    temp_input = iframe.find_by_css(selector)
+                    # For some reason floats can't be typed by splinter, so cast to str
+                    temp_input.fill(str(h))
+                    temp_input.click()
+            except (IndexError, ElementDoesNotExist, AttributeError) as e:
+                print('Please check your data. There are more days in your data '
+                      'than there are fields in intacct.')
+            print('hours iframe worked')
+    except NoSuchFrameException:
+        try:
+            for i, h in enumerate(hours):
+                selector = 'input#_obj__TIMESHEETITEMS_{}_-_obj__DAY_{}'.format(
                 index, i)
-            temp_input = browser.find_by_css(selector)
-            # For some reason floats can't be typed by splinter, so cast to str
-            temp_input.fill(str(h))
-            temp_input.click()
-    except (IndexError, ElementDoesNotExist, AttributeError) as e:
-        print('Please check your data. There are more days in your data '
-              'than there are fields in intacct.')
+                temp_input = browser.find_by_css(selector)
+                # For some reason floats can't be typed by splinter, so cast to str
+                temp_input.fill(str(h))
+                temp_input.click()
+        except (IndexError, ElementDoesNotExist, AttributeError) as e:
+            print('Please check your data. There are more days in your data '
+                  'than there are fields in intacct.')
+        print('hours browser worked')
 
 
 def fill_row(browser, index, customer, project, task, hours, delay=3):
@@ -131,18 +180,18 @@ def create_new_timecard(browser):
     browser.find_by_css('span[menuitemrefno="57"]').click()
     time.sleep(2)
 
-
 def main():
     start_date = '2018-01-16'
     end_date = '2018-01-31'
+    email, url = load_config()
 
     browser = splinter.Browser('chrome')
-
-    browser.visit(INTACCT_URL)
+    browser.visit(url)
     while len(browser.find_by_css('#okta-signin-username')) != 1:
         time.sleep(1)
     else:
-        browser.find_by_css('#okta-signin-username').fill(INTACCT_USERNAME)
+        browser.find_by_css('#okta-signin-username').fill(email)
+        browser.find_by_css('#okta-signin-password').fill('')
 
     print('Please login')
     input('Press enter after you are logged in.')
@@ -156,16 +205,17 @@ def main():
     time.sleep(1)
 
     t = toggl.Toggl()
-    df = t.intacct_report(start_date, end_date)
+    df = t.intacct_report(start_date, end_date, save_csv=False)
     print(df.head())
 
     for i, row in df.iterrows():
-        browser.find_by_css(
-            '#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(i)).click()
-        fill_row(browser, i, row['client_code'], row['project_code'],
-                 row['task_code'], listify_hours(row), delay=1)
+        with browser.get_iframe('iamain') as iframe:
+            iframe.find_by_css(
+                '#_obj__TIMESHEETITEMS_{}_-_obj__CUSTOMERID'.format(i)).click()
+            fill_row(browser, i, row['client_code'], row['project_code'],
+                     row['task_code'], listify_hours(row), delay=1)
 
-        save_draft(browser)
+    save_draft(browser)
 
 if __name__ == '__main__':
     main()
