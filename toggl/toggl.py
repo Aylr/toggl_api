@@ -139,7 +139,7 @@ class Toggl(object):
 
         return df
 
-    def timesheet_format(self, start, end, save_csv=False):
+    def timesheet_report(self, start, end, save_csv=True):
         """
         Generate a dataframe & csv in a generic timesheet format.
 
@@ -149,7 +149,7 @@ class Toggl(object):
         Args:
             start (str): The start date in 'YYYY-MM-DD' format
             end (str): The end date in 'YYYY-MM-DD' format
-            save_csv (bool): Save a csv. (default False)
+            save_csv (bool): Save a csv. (default True)
 
         Returns:
             pandas.DataFrame: A dataframe containing the timesheet format data
