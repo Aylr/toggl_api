@@ -1,7 +1,7 @@
 """
 Toggl Data Wrangling.
 
-This class pulls data from the toggl API and build nice dataframes in various
+This class pulls data from the Toggl API and build nice dataframes in various
 formats.
 
 Usage:
@@ -11,40 +11,21 @@ toggl = Toggl(YOUR_EMAIL, YOUR_API_KEY)
 toggl.intacct_format()
 ```
 """
-import math
-import certifi
 import json
-
-import time
-
+import math
 import sys
-import yaml
-import pandas as pd
+import time
 from urllib.parse import urlencode
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
+
+import certifi
+import pandas as pd
+import yaml
 from base64 import b64encode
 
-
-class Endpoints(object):
-    """Endpoints for the toggl API."""
-
-    WORKSPACES = "https://www.toggl.com/api/v8/workspaces"
-    CLIENTS = "https://www.toggl.com/api/v8/clients"
-    PROJECTS = "https://www.toggl.com/api/v8/projects"
-    REPORT_WEEKLY = "https://toggl.com/reports/api/v2/weekly"
-    REPORT_DETAILED = "https://toggl.com/reports/api/v2/details"
-    REPORT_SUMMARY = "https://toggl.com/reports/api/v2/summary"
-    START_TIME = "https://www.toggl.com/api/v8/time_entries/start"
-    TIME_ENTRIES = "https://www.toggl.com/api/v8/time_entries"
-    WORKSPACES = 'https://www.toggl.com/api/v8/workspaces'
-
-    @staticmethod
-    def STOP_TIME(pid):
-        """Get the stop time url."""
-        url = 'https://www.toggl.com/api/v8/time_entries/' + str(pid) + '/stop'
-        return url
-
-    CURRENT_RUNNING_TIME = "https://www.toggl.com/api/v8/time_entries/current"
+import toggl
+import toggl.utilities as utils
+from .endpoints import Endpoints
 
 
 class Toggl(object):
@@ -60,7 +41,7 @@ class Toggl(object):
             verbose (bool): Set to True if you want debugging output.
         """
         if email is None and api_key is None:
-            config = _load_config()
+            config = utils.load_config()
             email = config['email']
             api_key = config['toggl_api_key']
         elif (email is not None and api_key is None) or (
@@ -76,16 +57,14 @@ class Toggl(object):
         self.params = self._build_default_params()
         self.current_page = 1
         self.pages = 1
+        self.toggl_clients = self._get_clients()
+        self.toggl_projects = self._get_workspace_projects()
         self.intacct_codes = None
-        self.toggl_projects = None
-        self.toggl_clients = None
         self.intacct_clients = None
         self.intacct_projects = None
-        self.intacct_client_codes = None
-        self.intacct_project_codes = None
 
     def detailed_report(self, start=None, end=None, params=None):
-        """Generate a dataframe that has all columns from toggl."""
+        """Generate a dataframe that has all columns from Toggl."""
         if params is None:
             params = self.params
         if start:
@@ -107,14 +86,12 @@ class Toggl(object):
         if self.verbose:
             print('Loaded {} records.'.format(len(df)))
 
-        self.toggl_projects = df['project'].unique()
-        self.toggl_clients = df['client'].unique()
-        self._check_for_missing_clients_in_toggle(df)
+        self._check_for_missing_clients_in_toggl(df)
 
         return df
 
     def report(self, start=None, end=None, params=None):
-        """Generate a dataframe of selected columns from toggl."""
+        """Generate a dataframe of selected columns from Toggl."""
         df = self.detailed_report(start=start, end=end, params=params)
 
         return df[[
@@ -126,7 +103,16 @@ class Toggl(object):
             'duration_min',
             'duration_hr']]
 
-    def intacct_format(self, start, end, save_csv=True):
+    def create_code_mapping_template(self):
+        """Create a code mapping template from your Toggl entries."""
+        try:
+            self.intacct_codes = self._load_code_mapping()
+            print('Found an existing code_mapping.yml file! Either use it '
+                  'or delete it and run this method again.')
+        except FileNotFoundError:
+            self._build_code_map_template()
+
+    def intacct_report(self, start, end, save_csv=True):
         """
         Generate a dataframe & csv that matches Intacct timesheet format.
 
@@ -145,8 +131,6 @@ class Toggl(object):
         self.intacct_codes = self._load_code_mapping()
         self.intacct_clients = self._get_intacct_client_human_names()
         self.intacct_projects = self._get_intacct_project_human_names()
-        self.intacct_client_codes = self._get_intacct_client_codes()
-        self.intacct_project_codes = self._get_intacct_project_codes()
 
         df = self.report(start=start, end=end)
         print('Pivoting {} toggl time entry records.'.format(len(df)))
@@ -198,11 +182,11 @@ class Toggl(object):
         record_count = response['total_count']
         self.pages = math.ceil(record_count / response['per_page'])
         if self.verbose and record_count > response['per_page']:
-            print('Pagination required: {} records found.'
-                  '{} of {} pages needed.'.format(
-                    record_count,
-                    self.current_page,
-                    self.pages))
+            print('Pagination required: {} records found.{} of {} pages '
+                  'needed.'.format(
+                        record_count,
+                        self.current_page,
+                        self.pages))
 
         df = pd.DataFrame(response['data'])
         df = self._clean_times(df)
@@ -269,7 +253,7 @@ class Toggl(object):
             return workspaces[0]['id']
         else:
             raise RuntimeError('Warning! You have more than 1 workspace. This '
-                               'is an MVP andcannot deal with your mess.')
+                               'is an MVP and cannot deal with your mess.')
 
     def _build_default_params(self):
         return {
@@ -289,15 +273,6 @@ class Toggl(object):
         self.current_page = 1
         self.pages = 1
 
-    def _load_code_mapping(self):
-        """Load a code_mapping.yml file."""
-        code_mappings = _load_yml_file(
-            "code_mapping.yml",
-            error_message='No code mapping file found. Please see the docs and ' \
-                          'create a code_mapping.yml file')
-
-        return code_mappings
-
     def _get_intacct_client_human_names(self):
         """Get a list of all unique intacct client human names."""
         return list(set(self.intacct_codes.keys()))
@@ -316,6 +291,7 @@ class Toggl(object):
         client_codes = []
         for k, v in self.intacct_codes.items():
             client_codes.append(v['intacct_client'])
+
         return sorted(list(set(client_codes)))
 
     def _get_intacct_project_codes(self):
@@ -336,48 +312,100 @@ class Toggl(object):
                     task_codes.append(v2['intacct_task'])
         return sorted(list(set(task_codes)))
 
-    def _check_for_missing_clients_in_toggle(self, df):
+    def _check_for_missing_clients_in_toggl(self, df):
         if df['client'].isnull().sum():
             missing_client_entries = df.loc[
                 df['client'].isnull(), ['start', 'description', 'duration']]
             print('WARNING! The following {} toggle entries are missing a '
-                  'client. If you want these mapped to an intacct client, ' \
-                  'please go to the web and add clients to entries without ' \
+                  'client. If you want these mapped to an intacct client, '
+                  'please go to the web and add clients to entries without '
                   ' them.'.format(len(missing_client_entries)))
             print(missing_client_entries, '\n')
 
     def _show_missing_intacct_project_codes(self):
         missing_projects = set(self.toggl_projects) - set(self.intacct_projects)
-        print('\nWARNING! Your code mapping file is missing entries for '
-              '{} clients that were found on Toggl. Please add them and try '
-              'again.'.format(len(missing_projects)))
-        print(missing_projects)
+        if len(missing_projects) > 0:
+            print('\nWARNING! Your code mapping file is missing entries for '
+                  '{} projects that were found on Toggl. Please add them and try '
+                  'again.'.format(len(missing_projects)))
+            print(missing_projects)
 
     def _show_missing_intacct_client_codes(self):
-        missing_clients = set(self.toggl_clients) - set(self.intacct_clients)
+        toggl_client_names = [c['name'] for c in self.toggl_clients]
+        missing_clients = set(toggl_client_names) - set(self.intacct_clients)
         print('\nWARNING! Your code mapping file is missing entries for '
               '{} clients that were found on Toggl. Please add them and try '
               'again.'.format(len(missing_clients)))
         print(missing_clients)
 
-    def create_code_mapping_template(self):
-        df = self.detailed_report()
+    def _get_client_names(self):
+        """Get a list of all client names on Toggl."""
+        response = self.request(Endpoints.CLIENTS, self.params)
 
+        return [x['name'] for x in response]
 
+    def _get_client_ids(self):
+        """Get a list of all client ids on Toggl."""
+        response = self.request(Endpoints.CLIENTS, self.params)
 
-def _load_yml_file(yml, error_message='Error loading yml file.'):
-    """Load a yml file."""
-    try:
-        with open(yml, 'r') as ymlfile:
-            cfg = yaml.load(ymlfile)
-            return cfg
-    except FileNotFoundError as fe:
-        raise RuntimeError(error_message)
+        return [x['id'] for x in response]
 
+    def _get_clients(self):
+        """Get a list of all clients on Toggl."""
+        return self.request(Endpoints.CLIENTS, self.params)
 
-def _load_config():
-    """Load a config.yml file."""
-    return _load_yml_file(
-        "config.yml",
-        error_message='No config file found. Please see the docs and create a '
-                      'config.yml file')
+    def _get_workspace_projects(self):
+        """Get a list of all projects on Toggl."""
+        response = self.request(Endpoints.WORKSPACE_PROJECTS(self.workspace),
+                               self.params)
+        return [x['name'] for x in response]
+
+    def _get_client_projects(self, client_id):
+        """Get a list of projects for a given client id."""
+        return self.request(
+            Endpoints.CLIENT_PROJECTS(client_id),
+            self.params)
+
+    def _get_projects_by_client(self):
+        """Get a dictionary of all projects by client."""
+        projects_by_client = {}
+
+        for c in self.toggl_clients:
+            projects_by_client[c['name']] = {
+                'intacct_client': 'CLIENT_CODE'}
+            projects = self._get_client_projects(c['id'])
+
+            if projects is not None:
+                for p in projects:
+                    projects_by_client[c['name']][p['name']] = {
+                        'intacct_project': 'PROJECT_CODE',
+                        'intacct_task': 'TASK_CODE'}
+
+        return projects_by_client
+
+    def _build_code_map_template(self):
+        template = self._get_projects_by_client()
+
+        with open('code_mapping.yml', 'w') as outfile:
+            yaml.dump(template, outfile, default_flow_style=False)
+
+        print("""
+        Generated a code_mapping.yml template file. Please edit it as folows:
+
+        1. Intacct has a Customer > Project > Task hierarchy, while Toggl uses
+        a Client > Project hierarchy. This means that you must map each Toggl
+        project to two Intacct codes.
+        2. Copy and paste the client, project and task codes into the template.
+        3. Save the template and run the `.intacct_format()` method.
+        """)
+        return template
+
+    @staticmethod
+    def _load_code_mapping():
+        """Load a code_mapping.yml file."""
+        code_mappings = toggl.utilities.load_yml_file(
+            "code_mapping.yml",
+            error_message='No code mapping file found. Please see the docs and ' \
+                          'create a code_mapping.yml file')
+
+        return code_mappings
