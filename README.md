@@ -9,7 +9,7 @@ With this package you can easily create dataframes from timed entries on [Toggl]
 
 ## Usage
 
-### 1. Create a Toggl Instance
+### Create a Toggl Instance
 
 Specify your email and api key when instantiating the Toggl class.
 
@@ -21,7 +21,7 @@ df = t.report(start='2018-01-01', end='2018-01-15')
 
 Run `python example.py` and note the three main dataframes returned.
 
-### 2. Create a Code Mapping File (Optional)
+### Create a Code Mapping File (Optional)
 
 If you are mapping Toggl clients & projects to Intacct customer/project/task codes, you need a `code_mapping.yml` file. Intacct has a **Customer** > **Project** > **Task** hierarchy, while Toggl uses a **Client** > **Project** hierarchy. This means that you must map each Toggl project to two Intacct codes. This only needs to be done once.
 
@@ -66,11 +66,24 @@ email: YOUR_TOGGL_EMAIL
 toggl_api_key: YOUR_TOGGL_API_KEY
 ```
 
-## Intacct Format Report
-
 ## Detailed Usage
 
-### Intacct Format Reports
+### Timesheet Format Report
+
+To get a dataframe and csv resampled and pivoted to match a generic timesheet 
+format, use the `.timesheet_report()` method.
+
+When called, it requires a start and end date. This function returns a pandas
+dataframe and by default saves a .csv file. CSV output can be disabled by using
+the `save_csv=False` argument.
+
+```python
+t = Toggl()
+
+df = t.timesheet_report(start='2018-01-01', end='2018-01-15')
+```
+
+### Intacct Format Report
 
 To get a dataframe and csv resampled and pivoted to match Intacct Timesheet 
 format, use the `.intacct_report()` method.
