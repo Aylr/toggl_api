@@ -132,32 +132,79 @@ class Toggl(object):
         self.intacct_clients = self._get_intacct_client_human_names()
         self.intacct_projects = self._get_intacct_project_human_names()
 
+        header_columns = ['client_code', 'project_code', 'task_code']
+        pivoted_df = self._get_timesheet_pivoted_entries(
+            start,
+            end,
+            header_columns,
+            intacct_encode=True)
+
+        if save_csv:
+            self._save_csv(pivoted_df)
+
+        return pivoted_df
+
+    def _get_timesheet_pivoted_entries(
+            self,
+            start,
+            end,
+            header_columns,
+            intacct_encode=False):
+        """
+        Get toggle entries and pivot them into a timesheet format.
+
+        Args:
+            start (str): start date
+            end (str): end date
+            header_columns (list): a list of header columns to keep
+            intacct_encode (bool): True to encode with intacct codes.
+        """
         df = self.report(start=start, end=end)
         print('Pivoting {} toggl time entry records.'.format(len(df)))
-
         df.set_index(df['start'], inplace=True)
         resampled = df[
             ['client', 'project', 'start', 'duration_hr']].groupby(
             ['client', 'project']).resample('D').sum()
-
         pivot = resampled.pivot_table(index=['client', 'project'],
                                       columns='start',
                                       values='duration_hr')
-
         reshaped = pivot.fillna(0).reset_index()
-        coded = self._map_codes(reshaped)
-        codes = coded[['client_code', 'project_code', 'task_code']]
-        dates = coded.select_dtypes(include='float64')
+
+        if intacct_encode:
+            reshaped = self._map_codes(reshaped)
+
+        header_columns = reshaped[header_columns]
+        dates = reshaped.select_dtypes(include='float64')
         idx = pd.date_range(start, end)
         fixed_dates = dates.reindex(idx, axis='columns', fill_value=0)
+        reordered = pd.concat([header_columns, fixed_dates], axis=1,
+                              join_axes=[reshaped.index])
+        return reordered
 
-        reordered = pd.concat([codes, fixed_dates], axis=1,
-                              join_axes=[coded.index])
+    def timesheet_format(self, start, end, save_csv=False):
+        """
+        Generate a dataframe & csv in a generic timesheet format.
+
+        Index, re-sample, pivot and fill nas, reorder columns, fill missing
+        days and optinally save a csv.
+
+        Args:
+            start (str): The start date in 'YYYY-MM-DD' format
+            end (str): The end date in 'YYYY-MM-DD' format
+            save_csv (bool): Save a csv. (default False)
+
+        Returns:
+            pandas.DataFrame: A dataframe containing the timesheet format data
+            with one row per client-project.
+        """
+
+        header_columns = ['client', 'project']
+        pivoted_df = self._get_timesheet_pivoted_entries(start, end, header_columns, intacct_encode=False)
 
         if save_csv:
-            self._save_csv(reordered)
+            self._save_csv(pivoted_df)
 
-        return reordered
+        return pivoted_df
 
     def request(self, endpoint, parameters=None):
         """Request an endpoint and return the data as a parsed JSON dict."""
@@ -236,6 +283,9 @@ class Toggl(object):
 
     def _map_codes(self, df):
         try:
+            df['client_code'] = None
+            df['project_code'] = None
+            df['task_code'] = None
             df['client_code'], df['project_code'], df['task_code'] = zip(
                 *df.apply(self._code_lookup, axis=1))
             return df
