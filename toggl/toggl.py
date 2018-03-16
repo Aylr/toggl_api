@@ -295,8 +295,12 @@ class Toggl(object):
         if len(workspaces) == 1:
             return workspaces[0]['id']
         else:
-            raise RuntimeError('Warning! You have more than 1 workspace. This '
-                               'is an MVP and cannot deal with your mess.')
+            print('Warning! You have more than 1 workspace. This '
+                  'is an MVP and cannot deal with your mess.'
+                 'You will only get data back from your 1st workspace.')
+            return workspaces[0]['id']
+
+
 
     def _build_default_params(self):
         return {
