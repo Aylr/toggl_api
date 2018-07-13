@@ -129,10 +129,14 @@ class Toggl(object):
             with one row per client-project-task.
         """
         self.intacct_codes = self._load_code_mapping()
+        print('Loaded mapping')
+
         self.intacct_clients = self._get_intacct_client_human_names()
         self.intacct_projects = self._get_intacct_project_human_names()
+        print('Loaded clients and projects.')
 
         df = self._get_intacct_timesheet(start, end)
+        print('Got timesheet')
 
         if save_csv:
             self._save_csv(df)
@@ -266,12 +270,11 @@ class Toggl(object):
     def _code_lookup(self, row):
         """Lookup Intacct billing codes."""
         client = self.intacct_codes[row['client']]
-
         c_id = client['intacct_client']
         project = client[row['project']]
         p_id = project['intacct_project']
         t_id = project['intacct_task']
-
+        
         return c_id, p_id, t_id
 
     def _map_codes(self, df):
@@ -286,7 +289,7 @@ class Toggl(object):
             self._show_missing_intacct_project_codes()
             self._show_missing_intacct_client_codes()
             print(ke)
-            sys.exit(0)
+            raise RuntimeError('There was a problem mapping codes to projects and clients')
 
     def _get_workspace(self):
         """Get the user's first workspace."""
