@@ -31,19 +31,21 @@ from .endpoints import Endpoints
 class Toggl(object):
     """Toggl data class."""
 
-    def __init__(self, email=None, api_key=None, verbose=False):
+    def __init__(self, email=None, api_key=None, workspace=None, verbose=False):
         """
         Create a Toggl object.
 
         Args:
-            email (str): Your toggle email.
-            api_key (str): Your toggle api_key.
+            email (str): Your toggl email.
+            api_key (str): Your toggl api_key.
+            workspace (int): Your toggl workspace id
             verbose (bool): Set to True if you want debugging output.
         """
-        if email is None and api_key is None:
+        if email is None and api_key is None and workspace is None:
             config = utils.load_config()
             email = config['email']
             api_key = config['toggl_api_key']
+            workspace = config['workspace_id']
         elif (email is not None and api_key is None) or (
                         email is None and api_key is not None):
             raise RuntimeError('Please specify both an email and api_key')
@@ -53,7 +55,7 @@ class Toggl(object):
         self.verbose = verbose
         self.cafile = certifi.where()
         self.headers = self._build_headers(api_key)
-        self.workspace = self._get_workspace()
+        self.workspace = workspace
         self.params = self._build_default_params()
         self.current_page = 1
         self.pages = 1
@@ -62,6 +64,9 @@ class Toggl(object):
         self.intacct_codes = None
         self.intacct_clients = None
         self.intacct_projects = None
+
+    def __repr__(self):
+        return f'Toggl(email={self.email}, api_key={self.api_key}, workspace={self.workspace}, verbose={self.verbose})'
 
     def detailed_report(self, start=None, end=None, params=None):
         """Generate a dataframe that has all columns from Toggl."""
