@@ -17,8 +17,8 @@ import splinter
 from selenium.common.exceptions import NoSuchFrameException
 from splinter.exceptions import ElementDoesNotExist
 
-import toggl
 import toggl.utilities as utils
+from toggl.intacct.intacct import IntacctToggl
 
 
 def load_config():
@@ -216,7 +216,7 @@ if __name__ == "__main__":
     email, url = load_config()
 
     # ## Load Data From Toggl
-    t = toggl.Toggl()
+    t = IntacctToggl()
     df = t.intacct_report(start=start_date, end=end_date)
 
     # ## Compare Hours Totals

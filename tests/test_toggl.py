@@ -16,15 +16,12 @@ def test_raise_error_if_api_key_alone():
 def test_default_state():
     t = Toggl("email@foo.com", "secret", 99)
     assert t.email == "email@foo.com"
-    assert t.api_key == "secret"
-    assert t.verbose is False
+    assert t._api_key == "secret"
+    assert t._verbose is False
     assert t.workspace == 99
     assert t._current_page == 1
     assert t._pages == 1
     assert t._current_records_acquired == 0
-    assert t.intacct_codes is None
-    assert t.intacct_clients is None
-    assert t.intacct_projects is None
 
 
 def test_reset_pagination():

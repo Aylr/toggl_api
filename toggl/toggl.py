@@ -20,11 +20,9 @@ from urllib.request import Request, urlopen
 
 import certifi
 import pandas as pd
-import yaml
 
-import toggl
-import toggl.utilities as utils
-from .endpoints import Endpoints
+import toggl.utilities
+from toggl.endpoints import Endpoints
 
 
 class Toggl(object):
@@ -41,7 +39,7 @@ class Toggl(object):
             verbose (bool): Set to True if you want debugging output.
         """
         if email is None and api_key is None and workspace is None:
-            config = utils.load_config()
+            config = toggl.utilities.load_config()
             email = config["email"]
             api_key = config["toggl_api_key"]
             workspace = config["workspace_id"]
@@ -51,29 +49,44 @@ class Toggl(object):
             raise RuntimeError("Please specify both an email and api_key")
 
         self.email = email
-        self.api_key = api_key
-        self.verbose = verbose
-        self.cafile = certifi.where()
         self.workspace = workspace
+        self._api_key = api_key
+        self._cafile = certifi.where()
+        self._verbose = verbose
 
         # Statefulness
         self._current_page = 1
         self._pages = 1
         self._current_records_acquired = 0
-        self.intacct_codes = None
-        self.intacct_clients = None
-        self.intacct_projects = None
+
+    def __repr__(self):
+        return f"Toggl(email={self.email}, api_key={self._api_key}, workspace={self.workspace}, verbose={self._verbose})"
 
     @property
     def clients(self):
-        return self._get_clients()
+        """Get a list of all clients on Toggl."""
+        return self.request(Endpoints.CLIENTS, self.params)
 
     @property
     def toggl_projects(self):
-        return self._get_workspace_projects()
+        """Get a list of all projects on Toggl."""
+        response = self.request(
+            Endpoints.WORKSPACE_PROJECTS(self.workspace), self.params
+        )
+        return [x["name"] for x in response]
 
-    def __repr__(self):
-        return f"Toggl(email={self.email}, api_key={self.api_key}, workspace={self.workspace}, verbose={self.verbose})"
+    @property
+    def params(self):
+        return {"user_agent": self.email, "workspace_id": self.workspace}
+
+    @property
+    def headers(self):
+        return {
+            "Authorization": self._build_api_auth(self._api_key),
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+            "User-Agent": "python/urllib",
+        }
 
     def detailed_report(self, start=None, end=None, params=None):
         """Generate a dataframe that has all columns from Toggl."""
@@ -98,7 +111,7 @@ class Toggl(object):
 
         self._reset_instance_pagination()
 
-        if self.verbose:
+        if self._verbose:
             print("Loaded {} records.".format(len(df)))
 
         self._check_for_missing_clients_in_toggl(df)
@@ -121,49 +134,7 @@ class Toggl(object):
             ]
         ]
 
-    def create_code_mapping_template(self):
-        """Create a code mapping template from your Toggl entries."""
-        try:
-            self.intacct_codes = self._load_code_mapping()
-            print(
-                "Found an existing code_mapping.yml file! Either use it "
-                "or delete it and run this method again."
-            )
-        except FileNotFoundError:
-            self._build_code_map_template()
-
-    def intacct_report(self, start, end, save_csv=True):
-        """
-        Generate a dataframe & csv that matches Intacct timesheet format.
-
-        Index, re-sample, pivot and fill nas, reorder columns, fill missing
-        days and save a csv by default.
-
-        Args:
-            start (str): The start date in 'YYYY-MM-DD' format
-            end (str): The end date in 'YYYY-MM-DD' format
-            save_csv (bool): Save a csv
-
-        Returns:
-            pandas.DataFrame: A dataframe containing the timesheet format data
-            with one row per client-project-task.
-        """
-        self.intacct_codes = self._load_code_mapping()
-        print("Loaded mapping")
-
-        self.intacct_clients = self._get_intacct_client_human_names()
-        self.intacct_projects = self._get_intacct_project_human_names()
-        print("Loaded clients and projects.")
-
-        df = self._get_intacct_timesheet(start, end)
-        print("Got timesheet")
-
-        if save_csv:
-            self._save_csv(df)
-
-        return df
-
-    def timesheet_report(self, start, end, save_csv=True):
+    def timesheet_report(self, start, end, save_csv=False):
         """
         Generate a dataframe & csv in a generic timesheet format.
 
@@ -173,7 +144,7 @@ class Toggl(object):
         Args:
             start (str): The start date in 'YYYY-MM-DD' format
             end (str): The end date in 'YYYY-MM-DD' format
-            save_csv (bool): Save a csv. (default True)
+            save_csv (bool): Save a csv. (default False)
 
         Returns:
             pandas.DataFrame: A dataframe containing the timesheet format data
@@ -186,12 +157,22 @@ class Toggl(object):
 
         return df
 
-    def _get_intacct_timesheet(self, start, end):
-        """Get toggle entries and pivot them to an intacct timesheet format."""
-        header_columns = ["client_code", "project_code", "task_code"]
-        reshaped = self._get_pivoted_timesheet_entries(end, start)
-        encoded = self._map_codes(reshaped)
-        return self._add_missing_date_columns(start, end, header_columns, encoded)
+    def request(self, endpoint, parameters=None):
+        """Request an endpoint and return the data as a parsed JSON dict."""
+        return json.loads(self.request_raw(endpoint, parameters).decode("utf-8"))
+
+    def request_raw(self, endpoint, parameters=None):
+        """Request an endpoint and return raw data."""
+        if parameters is None:
+            return urlopen(
+                Request(endpoint, headers=self.headers), cafile=self._cafile
+            ).read()
+        else:
+            # encode all of our data for a get request & modify the URL
+            endpoint = endpoint + "?" + urlencode(parameters)
+            return urlopen(
+                Request(endpoint, headers=self.headers), cafile=self._cafile
+            ).read()
 
     def _get_timesheet(self, start, end):
         """Get toggle entries and pivot them to a time sheet format."""
@@ -227,23 +208,6 @@ class Toggl(object):
         reshaped = pivot.fillna(0).reset_index()
         return reshaped
 
-    def request(self, endpoint, parameters=None):
-        """Request an endpoint and return the data as a parsed JSON dict."""
-        return json.loads(self.request_raw(endpoint, parameters).decode("utf-8"))
-
-    def request_raw(self, endpoint, parameters=None):
-        """Request an endpoint and return raw data."""
-        if parameters is None:
-            return urlopen(
-                Request(endpoint, headers=self.headers), cafile=self.cafile
-            ).read()
-        else:
-            # encode all of our data for a get request & modify the URL
-            endpoint = endpoint + "?" + urlencode(parameters)
-            return urlopen(
-                Request(endpoint, headers=self.headers), cafile=self.cafile
-            ).read()
-
     def _load_report_page(self, params):
         response = self.request(Endpoints.REPORT_DETAILED, params)
 
@@ -254,7 +218,7 @@ class Toggl(object):
         df = self._clean_times(df)
         self._current_records_acquired += len(df)
 
-        if self.verbose and record_count > response["per_page"]:
+        if self._verbose and record_count > response["per_page"]:
             print(
                 f"{self._current_records_acquired} of {record_count} records acquired. {self._current_page} of {self._pages} pages needed."
             )
@@ -293,136 +257,27 @@ class Toggl(object):
 
         return auth_header
 
-    def _code_lookup(self, row):
-        """Lookup Intacct billing codes."""
-        client = self.intacct_codes[row["client"]]
-        c_id = client["intacct_client"]
-        project = client[row["project"]]
-        p_id = project["intacct_project"]
-        t_id = project["intacct_task"]
-
-        return c_id, p_id, t_id
-
-    def _map_codes(self, df):
-        try:
-            df["client_code"] = None
-            df["project_code"] = None
-            df["task_code"] = None
-            df["client_code"], df["project_code"], df["task_code"] = zip(
-                *df.apply(self._code_lookup, axis=1)
-            )
-            return df
-        except KeyError as ke:
-            self._show_missing_intacct_project_codes()
-            self._show_missing_intacct_client_codes()
-            print(ke)
-            raise RuntimeError(
-                "There was a problem mapping codes to projects and clients"
-            )
-
-    def _get_workspace(self):
-        """Get the user's first workspace."""
-        workspaces = self.request(Endpoints.WORKSPACES)
-
-        if len(workspaces) == 1:
-            return workspaces[0]["id"]
-        else:
-            print(
-                "Warning! You have more than 1 workspace. This "
-                "is an MVP and cannot deal with your mess."
-                "You will only get data back from your 1st workspace."
-            )
-            return workspaces[0]["id"]
-
-    @property
-    def params(self):
-        return {"user_agent": self.email, "workspace_id": self.workspace}
-
-    @property
-    def headers(self):
-        return {
-            "Authorization": self._build_api_auth(self.api_key),
-            "Content-Type": "application/json",
-            "Accept": "*/*",
-            "User-Agent": "python/urllib",
-        }
+    def _get_workspaces(self):
+        """Get the users workspaces."""
+        return self.request(Endpoints.WORKSPACES)
 
     def _reset_instance_pagination(self):
         self._current_page = 1
         self._pages = 1
         self._current_records_acquired = 0
 
-    def _get_intacct_client_human_names(self):
-        """Get a list of all unique intacct client human names."""
-        return list(set(self.intacct_codes.keys()))
-
-    def _get_intacct_project_human_names(self):
-        """Get a list of all unique intacct project human names."""
-        projects = []
-        for k, v in self.intacct_codes.items():
-            for k2, v2 in v.items():
-                if k2 != "intacct_client":
-                    projects.append(k2)
-        return sorted(list(set(projects)))
-
-    def _get_intacct_client_codes(self):
-        """Get a list of all unique intacct client codes."""
-        client_codes = []
-        for k, v in self.intacct_codes.items():
-            client_codes.append(v["intacct_client"])
-
-        return sorted(list(set(client_codes)))
-
-    def _get_intacct_project_codes(self):
-        """Get a list of all unique intacct project codes."""
-        project_codes = []
-        for k, v in self.intacct_codes.items():
-            for k2, v2 in v.items():
-                if k2 != "intacct_client":
-                    project_codes.append(v2["intacct_project"])
-        return sorted(list(set(project_codes)))
-
-    def _get_intacct_task_codes(self):
-        """Get a list of all unique intacct task codes."""
-        task_codes = []
-        for k, v in self.intacct_codes.items():
-            for k2, v2 in v.items():
-                if k2 != "intacct_client":
-                    task_codes.append(v2["intacct_task"])
-        return sorted(list(set(task_codes)))
-
-    def _check_for_missing_clients_in_toggl(self, df):
+    @staticmethod
+    def _check_for_missing_clients_in_toggl(df):
         if df["client"].isnull().sum():
             missing_client_entries = df.loc[
                 df["client"].isnull(), ["start", "description", "duration"]
             ]
             print(
-                "WARNING! The following {} toggle entries are missing a "
-                "client. If you want these mapped to an intacct client, "
-                "please go to the web and add clients to entries without "
-                " them.".format(len(missing_client_entries))
+                f"""WARNING! The following {len(missing_client_entries)} 
+toggle entries are missing a client. If you want these mapped to an intacct 
+client, please go to the web and add clients to entries without  them."""
             )
             print(missing_client_entries, "\n")
-
-    def _show_missing_intacct_project_codes(self):
-        missing_projects = set(self.toggl_projects) - set(self.intacct_projects)
-        if len(missing_projects) > 0:
-            print(
-                "\nWARNING! Your code mapping file is missing entries for "
-                "{} projects that were found on Toggl. Please add them and try "
-                "again.".format(len(missing_projects))
-            )
-            print(missing_projects)
-
-    def _show_missing_intacct_client_codes(self):
-        toggl_client_names = [c["name"] for c in self.clients]
-        missing_clients = set(toggl_client_names) - set(self.intacct_clients)
-        print(
-            "\nWARNING! Your code mapping file is missing entries for "
-            "{} clients that were found on Toggl. Please add them and try "
-            "again.".format(len(missing_clients))
-        )
-        print(missing_clients)
 
     def _get_client_names(self):
         """Get a list of all client names on Toggl."""
@@ -436,64 +291,6 @@ class Toggl(object):
 
         return [x["id"] for x in response]
 
-    def _get_clients(self):
-        """Get a list of all clients on Toggl."""
-        return self.request(Endpoints.CLIENTS, self.params)
-
-    def _get_workspace_projects(self):
-        """Get a list of all projects on Toggl."""
-        response = self.request(
-            Endpoints.WORKSPACE_PROJECTS(self.workspace), self.params
-        )
-        return [x["name"] for x in response]
-
     def _get_client_projects(self, client_id):
         """Get a list of projects for a given client id."""
         return self.request(Endpoints.CLIENT_PROJECTS(client_id), self.params)
-
-    def _get_projects_by_client(self):
-        """Get a dictionary of all projects by client."""
-        projects_by_client = {}
-
-        for c in self.clients:
-            projects_by_client[c["name"]] = {"intacct_client": "CLIENT_CODE"}
-            projects = self._get_client_projects(c["id"])
-
-            if projects is not None:
-                for p in projects:
-                    projects_by_client[c["name"]][p["name"]] = {
-                        "intacct_project": "PROJECT_CODE",
-                        "intacct_task": "TASK_CODE",
-                    }
-
-        return projects_by_client
-
-    def _build_code_map_template(self):
-        template = self._get_projects_by_client()
-
-        with open("code_mapping.yml", "w") as outfile:
-            yaml.dump(template, outfile, default_flow_style=False)
-
-        print(
-            """
-        Generated a code_mapping.yml template file. Please edit it as folows:
-
-        1. Intacct has a Customer > Project > Task hierarchy, while Toggl uses
-        a Client > Project hierarchy. This means that you must map each Toggl
-        project to two Intacct codes.
-        2. Copy and paste the client, project and task codes into the template.
-        3. Save the template and run the `.intacct_format()` method.
-        """
-        )
-        return template
-
-    @staticmethod
-    def _load_code_mapping():
-        """Load a code_mapping.yml file."""
-        code_mappings = toggl.utilities.load_yml_file(
-            "code_mapping.yml",
-            error_message="No code mapping file found. Please see the docs and "
-            "create a code_mapping.yml file",
-        )
-
-        return code_mappings
