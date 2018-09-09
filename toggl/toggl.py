@@ -31,19 +31,21 @@ from .endpoints import Endpoints
 class Toggl(object):
     """Toggl data class."""
 
-    def __init__(self, email=None, api_key=None, verbose=False):
+    def __init__(self, email=None, api_key=None, workspace=None, verbose=False):
         """
         Create a Toggl object.
 
         Args:
-            email (str): Your toggle email.
-            api_key (str): Your toggle api_key.
+            email (str): Your toggl email.
+            api_key (str): Your toggl api_key.
+            workspace (int): Your toggl workspace id
             verbose (bool): Set to True if you want debugging output.
         """
-        if email is None and api_key is None:
+        if email is None and api_key is None and workspace is None:
             config = utils.load_config()
             email = config['email']
             api_key = config['toggl_api_key']
+            workspace = config['workspace_id']
         elif (email is not None and api_key is None) or (
                         email is None and api_key is not None):
             raise RuntimeError('Please specify both an email and api_key')
@@ -52,16 +54,26 @@ class Toggl(object):
         self.api_key = api_key
         self.verbose = verbose
         self.cafile = certifi.where()
-        self.headers = self._build_headers(api_key)
-        self.workspace = self._get_workspace()
-        self.params = self._build_default_params()
-        self.current_page = 1
-        self.pages = 1
-        self.toggl_clients = self._get_clients()
-        self.toggl_projects = self._get_workspace_projects()
+        self.workspace = workspace
+
+        # Statefulness
+        self._current_page = 1
+        self._pages = 1
+        self._current_records_acquired = 0
         self.intacct_codes = None
         self.intacct_clients = None
         self.intacct_projects = None
+
+    @property
+    def clients(self):
+        return self._get_clients()
+
+    @property
+    def toggl_projects(self):
+        return self._get_workspace_projects()
+
+    def __repr__(self):
+        return f'Toggl(email={self.email}, api_key={self.api_key}, workspace={self.workspace}, verbose={self.verbose})'
 
     def detailed_report(self, start=None, end=None, params=None):
         """Generate a dataframe that has all columns from Toggl."""
@@ -74,12 +86,15 @@ class Toggl(object):
 
         df = self._load_report_page(params)
 
-        while self.current_page < self.pages:
-            self.current_page += 1
-            params['page'] = self.current_page
+        while self._current_page < self._pages:
+            # hacky way of rate limiting to meet toggl safe api limits
+            # https://github.com/toggl/toggl_api_docs#the-api-format
+            time.sleep(1)
+            self._current_page += 1
+            params['page'] = self._current_page
             df = pd.concat([df, self._load_report_page(params)])
 
-            df.reset_index(inplace=True)
+            df.reset_index(inplace=True, drop=True)
 
         self._reset_instance_pagination()
 
@@ -224,16 +239,15 @@ class Toggl(object):
         response = self.request(Endpoints.REPORT_DETAILED, params)
 
         record_count = response['total_count']
-        self.pages = math.ceil(record_count / response['per_page'])
-        if self.verbose and record_count > response['per_page']:
-            print('Pagination required: {} records found.{} of {} pages '
-                  'needed.'.format(
-                        record_count,
-                        self.current_page,
-                        self.pages))
+        self._pages = math.ceil(record_count / response['per_page'])
 
         df = pd.DataFrame(response['data'])
         df = self._clean_times(df)
+        self._current_records_acquired += len(df)
+
+        if self.verbose and record_count > response['per_page']:
+            print(f'{self._current_records_acquired} of {record_count} records acquired. {self._current_page} of {self._pages} pages needed.')
+
         return df
 
     @staticmethod
@@ -303,25 +317,26 @@ class Toggl(object):
                  'You will only get data back from your 1st workspace.')
             return workspaces[0]['id']
 
-
-
-    def _build_default_params(self):
+    @property
+    def params(self):
         return {
             'user_agent': self.email,
             'workspace_id': self.workspace
         }
 
-    def _build_headers(self, api_key):
+    @property
+    def headers(self):
         return {
-            "Authorization": self._build_api_auth(api_key),
+            "Authorization": self._build_api_auth(self.api_key),
             "Content-Type": "application/json",
             "Accept": "*/*",
             "User-Agent": "python/urllib",
         }
 
     def _reset_instance_pagination(self):
-        self.current_page = 1
-        self.pages = 1
+        self._current_page = 1
+        self._pages = 1
+        self._current_records_acquired = 0
 
     def _get_intacct_client_human_names(self):
         """Get a list of all unique intacct client human names."""
@@ -381,7 +396,7 @@ class Toggl(object):
             print(missing_projects)
 
     def _show_missing_intacct_client_codes(self):
-        toggl_client_names = [c['name'] for c in self.toggl_clients]
+        toggl_client_names = [c['name'] for c in self.clients]
         missing_clients = set(toggl_client_names) - set(self.intacct_clients)
         print('\nWARNING! Your code mapping file is missing entries for '
               '{} clients that were found on Toggl. Please add them and try '
@@ -420,7 +435,7 @@ class Toggl(object):
         """Get a dictionary of all projects by client."""
         projects_by_client = {}
 
-        for c in self.toggl_clients:
+        for c in self.clients:
             projects_by_client[c['name']] = {
                 'intacct_client': 'CLIENT_CODE'}
             projects = self._get_client_projects(c['id'])
