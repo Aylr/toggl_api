@@ -12,7 +12,7 @@ from toggl import Toggl
 
 toggl = Toggl(verbose=True)
 
-toggl.report(start='2018-08-10')
+toggl.report(start="2018-08-10")
 
 # detailed_report = toggl.detailed_report(start='2018-01-01', end='2018-01-15')
 # simple_report = toggl.report(start='2018-01-01', end='2018-01-15')
