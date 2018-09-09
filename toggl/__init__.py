@@ -1,5 +1,3 @@
 from .toggl import Toggl
 
-__all__ = [
-    'Toggl',
-]
+__all__ = ["Toggl"]

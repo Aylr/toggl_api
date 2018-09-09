@@ -9,16 +9,16 @@ from toggl.utilities import load_config, load_yml_file
 
 def test_load_config_raises_file_not_found_error_on_missing():
     with pytest.raises(FileNotFoundError):
-        load_yml_file('fake_file_does_not_exist.yml')
+        load_yml_file("fake_file_does_not_exist.yml")
 
 
 def test_load_config_returns_dict():
-    fixture_yml = 'test.yml'
-    with open(fixture_yml, 'w') as f:
+    fixture_yml = "test.yml"
+    with open(fixture_yml, "w") as f:
         f.write("foo: 'bar'\n")
 
     try:
-        assert load_yml_file(fixture_yml) == {'foo': 'bar'}
+        assert load_yml_file(fixture_yml) == {"foo": "bar"}
     finally:
         safe_remove_file(fixture_yml)
 
