@@ -1,5 +1,4 @@
 import yaml
-
 import toggl
 
 INTACCT_CODE_MAPPING_FILENAME = "code_mapping.yml"

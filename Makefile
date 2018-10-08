@@ -39,7 +39,9 @@ test: ## run tests quickly with the default Python
 	py.test
 
 install: clean ## install the package to the active Python's site-packages
-	python setup.py install
+	pip install -e .
+#	pip install -r requirements.txt
+	pip install -r dev-requirements.txt
 
 clean: clean-build clean-pyc clean-test ## remove all build, test, coverage and Python artifacts
 
@@ -61,3 +63,6 @@ clean-test: ## remove test and coverage artifacts
 	rm -f .coverage
 	rm -fr htmlcov/
 	rm -fr .pytest_cache
+
+venv: ## Set up a new virtualenvironment
+	test -d .venv || virtualenv .venv --prompt='(toggl) '
