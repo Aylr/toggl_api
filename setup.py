@@ -8,9 +8,9 @@ setup(
     description="Toggl datawrangling in python.",
     packages=find_packages(),
     install_requires=[
-        "certifi==2018.1.18",
-        "pandas==0.22.0",
-        "pyaml==17.12.1",
-        "dateparser==0.6.0",
+        "certifi",
+        "pandas",
+        "pyaml",
+        "dateparser",
     ],
 )
