@@ -1,4 +1,4 @@
-V8_BASE_URL = "https://www.toggl.com/api/v8"
+V8_BASE_URL = "https://api.track.toggl.com/api/v8"
 
 
 class Endpoints(object):
@@ -7,12 +7,12 @@ class Endpoints(object):
     WORKSPACES = f"{V8_BASE_URL}/workspaces"
     CLIENTS = f"{V8_BASE_URL}/clients"
     PROJECTS = f"{V8_BASE_URL}/projects"
-    REPORT_DETAILED = "https://toggl.com/reports/api/v2/details"
-    REPORT_SUMMARY = "https://toggl.com/reports/api/v2/summary"
+    REPORT_DETAILED = "https://api.track.toggl.com/reports/api/v2/details"
+    REPORT_SUMMARY = "https://api.track.toggl.com/reports/api/v2/summary"
     START_TIME = f"{V8_BASE_URL}/time_entries/start"
     TIME_ENTRIES = f"{V8_BASE_URL}/time_entries"
     CURRENT_RUNNING_TIME = f"{V8_BASE_URL}/time_entries/current"
-    REPORT_WEEKLY = "https://toggl.com/reports/api/v2/weekly"
+    REPORT_WEEKLY = "https://api.track.toggl.com/reports/api/v2/weekly"
 
     @staticmethod
     def STOP_TIME(pid):
